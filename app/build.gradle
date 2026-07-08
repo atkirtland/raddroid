@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.raddroid.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.raddroid.app"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+
+        ndk {
+            abiFilters "arm64-v8a", "x86_64"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+}
+
+// uv (https://docs.astral.sh/uv/) installs Python under ~/.local/share/uv/python
+// and puts a version-less symlink (e.g. cpython-3.11-linux-x86_64-gnu) alongside
+// the real, version-pinned directory. Chaquopy's buildPython must point at the
+// real path, not a symlink/shim: uv-managed interpreters report sys.executable
+// as whatever path they were invoked through, so venv creation via a symlink
+// bakes a broken (non-relocatable) prefix into pyvenv.cfg. Resolving the
+// symlink here also means this keeps working after `uv python upgrade`.
+def uvPythonLink = new File(System.getProperty("user.home"),
+                           ".local/share/uv/python/cpython-3.11-linux-x86_64-gnu")
+def uvPythonHome = uvPythonLink.exists() ? uvPythonLink.canonicalFile : uvPythonLink
+def buildPythonPath = new File(uvPythonHome, "bin/python3.11").path
+
+chaquopy {
+    defaultConfig {
+        version "3.11"
+        buildPython buildPythonPath
+        pip {
+            install "radicale"
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+}

@@ -1,0 +1,47 @@
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+build/
+app/build/
+
+# Gradle files
+.gradle/
+gradle-app.setting
+
+# Local configuration file (sdk path, etc.), never commit this
+local.properties
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+.DS_Store
+
+# Native
+.externalNativeBuild/
+.cxx/
+
+# Keystore files (uncomment if you don't need to check in your keystore)
+#*.jks
+#*.keystore
+
+# Log files
+*.log
+
+# Android Profiling
+*.hprof
+/captures
+
+.claude
