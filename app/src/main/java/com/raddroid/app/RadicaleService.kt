@@ -20,12 +20,14 @@ class RadicaleService : Service() {
     companion object {
         const val ACTION_START = "com.raddroid.app.action.START"
         const val ACTION_STOP = "com.raddroid.app.action.STOP"
+        const val ACTION_CLEAR_LOG = "com.raddroid.app.action.CLEAR_LOG"
         const val EXTRA_STORAGE_DIR = "storage_dir"
         const val EXTRA_CONFIG_PATH = "config_path"
         const val EXTRA_PORT = "port"
         private const val CHANNEL_ID = "radicale_service"
         private const val NOTIFICATION_ID = 1
         private const val TAG = "RadicaleService"
+        private const val POLL_INTERVAL_MS = 1500L
 
         @Volatile
         var isRunning: Boolean = false
@@ -34,9 +36,15 @@ class RadicaleService : Service() {
         @Volatile
         var lastError: String = ""
             private set
+
+        @Volatile
+        var logSnapshot: String = ""
+            private set
     }
 
     private lateinit var pyModule: PyObject
+    @Volatile private var polling = false
+    private var pollThread: Thread? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -50,6 +58,12 @@ class RadicaleService : Service() {
         if (intent?.action == ACTION_STOP) {
             stopServer()
             stopSelf()
+            return START_NOT_STICKY
+        }
+
+        if (intent?.action == ACTION_CLEAR_LOG) {
+            pyModule.callAttr("clear_log")
+            pollState()
             return START_NOT_STICKY
         }
 
@@ -69,27 +83,67 @@ class RadicaleService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
+        startPolling()
+
         Thread {
             try {
                 pyModule.callAttr("start", configPath, storageDir)
-                isRunning = pyModule.callAttr("is_running").toBoolean()
-                lastError = pyModule.callAttr("last_error").toString()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start Radicale", e)
                 lastError = e.message ?: e.toString()
-                isRunning = false
             }
+            pollState()
         }.start()
 
         return START_STICKY
     }
 
+    // is_running() only reflects whether the Python thread is alive, which is true the
+    // instant it's started, well before it has attempted to bind a socket. Polling
+    // repeatedly (rather than checking once right after start()) is what lets us notice
+    // if it dies moments later instead of showing a stale "running" forever.
+    private fun startPolling() {
+        if (polling) return
+        polling = true
+        pollThread = Thread {
+            while (polling) {
+                pollState()
+                try {
+                    Thread.sleep(POLL_INTERVAL_MS)
+                } catch (e: InterruptedException) {
+                    break
+                }
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun stopPolling() {
+        polling = false
+        pollThread?.interrupt()
+        pollThread = null
+    }
+
+    private fun pollState() {
+        try {
+            isRunning = pyModule.callAttr("is_running").toBoolean()
+            lastError = pyModule.callAttr("last_error").toString()
+            logSnapshot = pyModule.callAttr("get_log").toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to poll Radicale state", e)
+        }
+    }
+
     private fun stopServer() {
+        stopPolling()
         pyModule.callAttr("stop")
         isRunning = false
     }
 
     override fun onDestroy() {
+        stopPolling()
         if (::pyModule.isInitialized) {
             stopServer()
         }

@@ -1,5 +1,7 @@
 package com.raddroid.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -23,8 +25,11 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var prefs: SharedPreferences
     private lateinit var folderInput: EditText
+    private lateinit var configInput: EditText
     private lateinit var statusText: TextView
     private lateinit var pathText: TextView
+    private lateinit var errorText: TextView
+    private lateinit var logText: TextView
 
     private val handler = Handler(Looper.getMainLooper())
     private val refreshRunnable = object : Runnable {
@@ -52,15 +57,26 @@ class MainActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("raddroid", MODE_PRIVATE)
         folderInput = findViewById(R.id.folderInput)
+        configInput = findViewById(R.id.configInput)
         statusText = findViewById(R.id.statusText)
         pathText = findViewById(R.id.pathText)
+        errorText = findViewById(R.id.errorText)
+        logText = findViewById(R.id.logText)
 
         folderInput.setText(prefs.getString("folder_name", "radicale"))
+        configInput.setText(prefs.getString("config_name", "config"))
 
         findViewById<Button>(R.id.grantButton).setOnClickListener { requestStoragePermission() }
         findViewById<Button>(R.id.startButton).setOnClickListener { startServer() }
         findViewById<Button>(R.id.stopButton).setOnClickListener { stopServer() }
         findViewById<Button>(R.id.openBrowserButton).setOnClickListener { openBrowser() }
+        findViewById<Button>(R.id.copyErrorButton).setOnClickListener {
+            copyToClipboard("RadDroid error", errorText.text.toString())
+        }
+        findViewById<Button>(R.id.copyLogButton).setOnClickListener {
+            copyToClipboard("RadDroid log", logText.text.toString())
+        }
+        findViewById<Button>(R.id.clearLogButton).setOnClickListener { clearLog() }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
@@ -78,7 +94,14 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(refreshRunnable)
-        prefs.edit().putString("folder_name", folderInput.text.toString()).apply()
+        saveInputs()
+    }
+
+    private fun saveInputs() {
+        prefs.edit()
+            .putString("folder_name", folderInput.text.toString())
+            .putString("config_name", configInput.text.toString())
+            .apply()
     }
 
     private fun hasStoragePermission(): Boolean {
@@ -107,10 +130,15 @@ class MainActivity : AppCompatActivity() {
         return File(Environment.getExternalStorageDirectory(), name)
     }
 
-    private fun ensureConfig(baseDir: File): File {
+    private fun resolvedConfigName(): String {
+        val name = configInput.text.toString().trim().ifEmpty { "config" }
+        return name.replace("/", "").replace("\\", "").ifEmpty { "config" }
+    }
+
+    private fun ensureConfig(baseDir: File, configName: String): File {
         baseDir.mkdirs()
         File(baseDir, "collections").mkdirs()
-        val configFile = File(baseDir, "config-android")
+        val configFile = File(baseDir, configName)
         if (!configFile.exists()) {
             val template = assets.open("config-android").bufferedReader().use { it.readText() }
             val content = template.replace("__BASE_DIR__", baseDir.absolutePath)
@@ -124,10 +152,10 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Grant storage access first", Toast.LENGTH_SHORT).show()
             return
         }
-        prefs.edit().putString("folder_name", folderInput.text.toString()).apply()
+        saveInputs()
 
         val baseDir = resolvedBaseDir()
-        val configFile = ensureConfig(baseDir)
+        val configFile = ensureConfig(baseDir, resolvedConfigName())
 
         val intent = Intent(this, RadicaleService::class.java).apply {
             action = RadicaleService.ACTION_START
@@ -152,13 +180,38 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("http://127.0.0.1:5232/")))
     }
 
-    private fun refreshStatus() {
-        statusText.text = if (RadicaleService.isRunning) {
-            "Running on 127.0.0.1:5232"
-        } else if (RadicaleService.lastError.isNotEmpty()) {
-            "Stopped (error: ${RadicaleService.lastError.take(200)})"
-        } else {
-            "Stopped"
+    private fun clearLog() {
+        val intent = Intent(this, RadicaleService::class.java).apply {
+            action = RadicaleService.ACTION_CLEAR_LOG
         }
+        startService(intent)
+        handler.postDelayed({ refreshStatus() }, 300)
+    }
+
+    private fun refreshStatus() {
+        val hasError = !RadicaleService.isRunning && RadicaleService.lastError.isNotEmpty()
+        val newStatus = when {
+            RadicaleService.isRunning -> "Running on 127.0.0.1:5232"
+            hasError -> "Stopped (error below)"
+            else -> "Stopped"
+        }
+        val newError = if (hasError) RadicaleService.lastError else ""
+        val newLog = RadicaleService.logSnapshot
+
+        // Re-assigning identical text resets any in-progress text selection, which makes
+        // it impossible to select-and-copy while the 2-second poll is running.
+        if (statusText.text.toString() != newStatus) statusText.text = newStatus
+        if (errorText.text.toString() != newError) errorText.text = newError
+        if (logText.text.toString() != newLog) logText.text = newLog
+    }
+
+    private fun copyToClipboard(label: String, text: String) {
+        if (text.isEmpty()) {
+            Toast.makeText(this, "Nothing to copy", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        Toast.makeText(this, "Copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 }
