@@ -45,3 +45,6 @@ local.properties
 /captures
 
 .claude
+local.properties
+.android
+.kotlin
