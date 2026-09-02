@@ -1,5 +1,8 @@
 # RadDroid
 
+> **Archived:** This project is no longer maintained. It has been subsumed by
+> [runpy-android](https://github.com/atkirtland/runpy-android).
+
 RadDroid runs [Radicale](https://radicale.org/) (a CalDAV/CardDAV server) directly on
 an Android device, as a foreground service. It lets you sync calendars and contacts
 between apps on the same device (or other devices on your LAN) without depending on a
